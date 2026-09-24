@@ -8,6 +8,8 @@
 #include <limits>
 #include <stdexcept>
 
+namespace wakeword
+{
 WhisperEngine::WhisperEngine(const WakeWordConfig &cfg)
     : m_cfg(cfg)
 {
@@ -69,3 +71,4 @@ std::string WhisperEngine::transcribe(const std::vector<float> &samples)
     text = trim_ascii(text);
     return is_meaningful_transcription(text) ? text : std::string();
 }
+} // namespace wakeword

@@ -4,6 +4,8 @@
 
 #include <utility>
 
+namespace wakeword
+{
 AudioCapture::AudioCapture(const WakeWordConfig &cfg)
     : m_cfg(cfg)
 {
@@ -124,3 +126,4 @@ int AudioCapture::trampoline(void *outputBuffer, void *inputBuffer, unsigned int
     self->m_callback(static_cast<const int16_t *>(inputBuffer), nBufferFrames);
     return 0;
 }
+} // namespace wakeword

@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+namespace wakeword
+{
 // Lowercase + strip punctuation. Whitespace and digits are preserved so whole
 // words remain tokenizable.
 std::string normalize_wake_text(const std::string &text)
@@ -68,3 +70,4 @@ std::string match_wake_word(const std::string &transcription,
     }
     return std::string();
 }
+} // namespace wakeword

@@ -8,6 +8,10 @@
 
 // Encapsulates whisper.cpp context lifecycle and transcription. All heavy
 // inference work happens in one thread; this class is not thread-safe.
+struct whisper_context;
+
+namespace wakeword
+{
 class WhisperEngine
 {
 public:
@@ -28,3 +32,4 @@ private:
     struct whisper_context *m_context = nullptr;
     WakeWordConfig m_cfg;
 };
+} // namespace wakeword

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+using namespace wakeword;
+
 namespace
 {
     constexpr unsigned int TARGET_WHISPER_FREQ = 16000;

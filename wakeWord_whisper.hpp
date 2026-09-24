@@ -15,8 +15,11 @@
 #include <string>
 #include <vector>
 
+namespace wakeword
+{
 class Vad;
 class WhisperEngine;
+}
 
 // Continuous, offline wake-word listener (VAD based). Audio capture + VAD run
 // on the RtAudio callback thread; resampling, whisper inference, and wake-word
@@ -52,9 +55,9 @@ private:
     WakeWordCallback m_callback;
     std::vector<std::string> m_wakeWords;
 
-    std::unique_ptr<WhisperEngine> m_engine;
-    std::unique_ptr<AudioCapture> m_capture;
-    std::unique_ptr<Vad> m_vad;
+    std::unique_ptr<wakeword::WhisperEngine> m_engine;
+    std::unique_ptr<wakeword::AudioCapture> m_capture;
+    std::unique_ptr<wakeword::Vad> m_vad;
 
     std::queue<std::vector<int16_t>> m_phraseQueue;
     std::mutex m_queueMutex;

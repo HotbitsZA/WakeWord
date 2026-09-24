@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+using namespace wakeword;
+
 static int g_failures = 0;
 
 #define CHECK(cond)                                                       \

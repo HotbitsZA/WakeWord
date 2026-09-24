@@ -9,6 +9,8 @@ namespace
     constexpr float kSamplesPerSecondDiv = 1.0f / 32768.0f;
 }
 
+namespace wakeword
+{
 Vad::Vad(unsigned sampleRate, const WakeWordConfig &cfg)
     : m_sampleRate(sampleRate),
       m_cfg(cfg),
@@ -159,3 +161,4 @@ void Vad::appendPreroll(const int16_t *samples, size_t frames)
         m_preroll.erase(m_preroll.begin(), m_preroll.begin() + static_cast<std::ptrdiff_t>(excess));
     }
 }
+} // namespace wakeword

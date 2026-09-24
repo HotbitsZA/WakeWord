@@ -10,6 +10,8 @@
 // Pure-logic voice activity detector. No I/O; driven by feed() calls from an
 // audio producer. Keeps an internal raw-PCM buffer and emits a completed Phrase
 // (with its on-set timestamp) when a silence window or max-duration bound is hit.
+namespace wakeword
+{
 class Vad
 {
 public:
@@ -61,3 +63,4 @@ private:
 
     std::optional<Phrase> m_completed;
 };
+} // namespace wakeword

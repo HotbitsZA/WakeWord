@@ -8,6 +8,8 @@
 #include <vector>
 
 // Convert int16 PCM to normalized float32 in [-1.0, 1.0].
+namespace wakeword
+{
 inline std::vector<float> pcm16_to_float(const std::vector<int16_t> &samples)
 {
     std::vector<float> out(samples.size());
@@ -91,3 +93,4 @@ inline std::string expand_home(const std::string &path)
     }
     return path;
 }
+} // namespace wakeword

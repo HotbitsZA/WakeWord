@@ -31,16 +31,16 @@ namespace
     {
         if (argc > 1 && argv[1] != nullptr && argv[1][0] != '\0')
         {
-            return expand_home(argv[1]);
+            return wakeword::expand_home(argv[1]);
         }
         if (const char *env = std::getenv("WAKE_MODEL"))
         {
             if (env[0] != '\0')
             {
-                return expand_home(env);
+                return wakeword::expand_home(env);
             }
         }
-        return expand_home("~/models/ggml-base.en.bin");
+        return wakeword::expand_home("~/models/ggml-base.en.bin");
     }
 
     // Comma-separated WAKE_WORDS env var -> default list.

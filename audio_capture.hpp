@@ -11,6 +11,8 @@
 // delivers raw int16 mono PCM blocks to the supplied callback.
 class RtAudio;
 
+namespace wakeword
+{
 class AudioCapture
 {
 public:
@@ -41,3 +43,4 @@ private:
     SamplesCallback m_callback;
     unsigned m_sampleRate = 0;
 };
+} // namespace wakeword

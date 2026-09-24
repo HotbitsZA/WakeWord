@@ -151,6 +151,15 @@ wakeEngine->update_wake_words({"assistant", "computer"});
 
 Wake words are normalized to lowercase internally before matching, and matching is performed on whole words only.
 
+## Namespaced Internals
+
+The low-level engine classes (`WhisperEngine`, `AudioCapture`, `Vad`, plus the
+`audio_utils` helpers and `match_wake_word`) live in a `wakeword::` namespace.
+The public `WakeWordEngine` / `WakeWordConfig` / `WakeWordCallback` interface
+stays in the global namespace. This lets the sibling `VoiceAssistantCore`
+project compile SpeechToText's equally-named globals and these copies into a
+single binary without symbol collisions. Standalone consumers are unaffected.
+
 ## Public Interface
 
 Use `WakeWordEngine` with a `WakeWordConfig` and a callback that receives both the matched trigger word and the full transcribed phrase:
