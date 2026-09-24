@@ -1,29 +1,38 @@
 #pragma once
 
 #include "cBaseWorker_V2.h"
-#include <string>
-#include <vector>
-#include <memory>
+
+#include "audio_capture.hpp"
+#include "wakeword_config.hpp"
+
 #include <atomic>
-#include <mutex>
-#include <queue>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <vector>
 
-struct whisper_context;
-class RtAudio;
+class Vad;
+class WhisperEngine;
 
+// Continuous, offline wake-word listener (VAD based). Audio capture + VAD run
+// on the RtAudio callback thread; resampling, whisper inference, and wake-word
+// matching run on this class's background worker thread.
 class WakeWordEngine : public cBaseWorker_V2
 {
 public:
-    // This callback fires ONLY when a registered wake word is cleanly matched in speech
-    using WakeWordCallback = std::function<void(const std::string &matchedWord, const std::string &fullSentence)>;
+    // Fires ONLY when a registered wake word is cleanly matched in speech.
+    using WakeWordCallback =
+        std::function<void(const std::string &matchedWord, const std::string &fullSentence)>;
 
-    // Pass model path, a list of lowercase wake words, and the target callback handler
-    WakeWordEngine(const std::string &model_path,
-                   const std::vector<std::string> &wake_words,
-                   WakeWordCallback callback = nullptr);
+    explicit WakeWordEngine(const WakeWordConfig &cfg, WakeWordCallback callback = nullptr);
     ~WakeWordEngine() noexcept override;
+
+    WakeWordEngine(const WakeWordEngine &) = delete;
+    WakeWordEngine &operator=(const WakeWordEngine &) = delete;
 
     void set_callback(WakeWordCallback callback);
     void update_wake_words(const std::vector<std::string> &new_words);
@@ -34,36 +43,21 @@ protected:
     void stopTriggered() override;
 
 private:
-    static int audio_callback(void *outputBuffer, void *inputBuffer, unsigned int nBufferFrames,
-                              double streamTime, unsigned int status, void *userData);
+    void onAudioSamples(const int16_t *samples, unsigned frames);
+    void enqueuePhrase(std::vector<int16_t> &&samples);
 
-    void process_incoming_samples(const int16_t *samples, unsigned int frames);
-    void slice_and_queue_active_phrase();
-    void evaluate_transcription_for_wake_words(const std::string &text);
+    WakeWordConfig m_cfg;
 
-    std::string m_modelPath;
-    WakeWordCallback m_onWakeWordDetected;
-    struct whisper_context *ctx = nullptr;
-    std::unique_ptr<RtAudio> adc;
+    mutable std::mutex m_cbMutex;
+    WakeWordCallback m_callback;
+    std::vector<std::string> m_wakeWords;
 
-    // VAD & Energy State Parameters
-    std::vector<int16_t> audio_buffer;
-    std::mutex audio_mutex;
+    std::unique_ptr<WhisperEngine> m_engine;
+    std::unique_ptr<AudioCapture> m_capture;
+    std::unique_ptr<Vad> m_vad;
 
-    float m_vadThreshold = 0.003f;
-    size_t m_silenceTimeoutSamples = 0;
-    size_t m_consecutiveSilenceSamples = 0;
-    bool m_isSpeaking = false;
-
-    // Wake Word matching tracking lists
-    std::vector<std::string> m_wakeWords; // Sorted, lower-case strings for fast lookups
-    std::mutex m_wordsMutex;
-
-    // Deep Asynchronous Execution Pipelines
-    std::queue<std::vector<float>> m_taskQueue;
+    std::queue<std::vector<int16_t>> m_phraseQueue;
     std::mutex m_queueMutex;
     std::condition_variable m_queueCV;
-
-    class Impl;
-    std::unique_ptr<Impl> m_pImpl;
+    size_t m_dropped = 0;
 };

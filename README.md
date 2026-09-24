@@ -8,32 +8,44 @@ The example monitors the words `computer`, `jarvis`, and `alexa`, then prints a 
 
 - **Offline wake-word detection** with no cloud telemetry.
 - **Continuous microphone monitoring** through RtAudio.
-- **Ambient noise calibration** during startup to tune the VAD threshold.
+- **Ambient noise calibration** during startup to tune the VAD threshold (percentile-based and robust to transient spikes).
 - **Pre-roll buffering** so phrase starts are less likely to be clipped.
+- **Max-phrase duration guard** so long monologue is sliced instead of growing unboundedly.
+- **Hysteresis hangover** so VAD does not chatter at the threshold boundary mid-phrase.
+- **Whole-word (word-boundary) matching** to avoid false triggers like "computer" inside "microcomputer".
 - **Whisper beam search** for more stable candidate transcriptions.
 - **Callback-based event dispatch** for connecting wake events to local assistants, macros, or automation flows.
+- **Bounded worker queue** with throttled back-pressure warnings.
 - **Worker-thread lifecycle** through the sibling `ThreadComponent` project.
 
 ## How It Works
 
 1. The app opens the default microphone and samples ambient room noise for calibration.
-2. Incoming audio is scanned for active speech and split when a pause is detected.
+2. Incoming audio is scanned for active speech and split when a pause (or the max-phrase duration) is reached.
 3. Captured speech is resampled to Whisper's 16 kHz mono PCM format when needed.
 4. `whisper.cpp` transcribes the speech segment with beam search.
-5. The transcript is lowercased, stripped of punctuation, and checked against the configured wake-word list.
+5. The transcript is lowercased, stripped of punctuation, and checked word-by-word against the configured wake-word list.
 6. A user callback fires when a wake word is matched.
 
 ## Project Layout
 
 ```text
 WakeWord/
-|-- CMakeLists.txt          # executable build: WhisperWakeWordEngine
+|-- CMakeLists.txt           # ww_core static lib + WhisperWakeWordEngine + ww_tests
 |-- README.md
 |-- .gitignore
-|-- example_wakeword.cpp    # demo app and terminal loop
-|-- wakeWord_whisper.hpp    # WakeWordEngine public interface
-|-- wakeWord_whisper.cpp    # capture, VAD, resampling, transcription, matching
-`-- term_util.h             # raw terminal polling helper
+|-- example_wakeword.cpp     # demo app, terminal loop, model resolution
+|-- wakeWord_whisper.hpp     # WakeWordEngine public interface (thin composition)
+|-- wakeWord_whisper.cpp     # worker composition: capture + VAD + whisper + matching
+|-- wakeword_config.hpp      # WakeWordConfig struct
+|-- audio_utils.hpp          # shared inline helpers (resample, convert, trim, expand_home)
+|-- vad.hpp / vad.cpp        # pure-logic voice activity detector + calibration
+|-- whisper_engine.hpp/.cpp  # whisper.cpp lifecycle + transcription wrapper
+|-- audio_capture.hpp/.cpp   # RAII RtAudio input wrapper
+|-- wakeword_matcher.hpp/.cpp # pure whole-word wake matcher
+|-- term_util.h              # RAII raw terminal polling helper
+`-- tests/
+    `-- test_wakeword_utils.cpp  # unit tests (pure logic, no hardware)
 ```
 
 The engine also expects the sibling `ThreadComponent` project to be available at:
@@ -57,7 +69,7 @@ brew install cmake pkg-config rtaudio whisper-cpp
 
 ## Model Setup
 
-Download a Whisper GGML model before running the example. The current demo expects:
+Download a Whisper GGML model before running the example. The default location is:
 
 ```text
 ~/models/ggml-base.en.bin
@@ -72,7 +84,12 @@ curl -L \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-To use a different model path, update `model_path` in `example_wakeword.cpp`.
+To use a different model path, pass it as the first argument or set `WAKE_MODEL`:
+
+```bash
+./build/WhisperWakeWordEngine /path/to/ggml-base.en.bin
+WAKE_MODEL=/path/to/ggml-base.en.bin ./build/WhisperWakeWordEngine
+```
 
 ## Build
 
@@ -89,6 +106,12 @@ The executable is created at:
 build/WhisperWakeWordEngine
 ```
 
+Run the unit tests:
+
+```bash
+ctest --test-dir build
+```
+
 ## Run
 
 ```bash
@@ -102,20 +125,22 @@ Press `Q` to stop the listener, close audio streams, join the worker thread, and
 Example output:
 
 ```text
-[Wake VAD Calibrated] Floor: 0.00042 -> Threshold: 0.003
+[WakeWordEngine] System online at 48000 Hz. Calibrating noise levels... (please stay quiet briefly)
 
-[WAKE EVENT DETECTED]: System Activated!
-Trigger Key  : jarvis
-Full Context : "jarvis open the workspace"
+[VAD Calibration Complete] Ambient noise: 0.00042 -> Dynamic Threshold auto-set to: 0.003
+
+[WAKE EVENT DETECTED] System Activated!
+  Trigger Key  : jarvis
+  Full Context : "jarvis open the workspace"
 =========================================================
 ```
 
 ## Configure Wake Words
 
-The example defines its wake words in `example_wakeword.cpp`:
+By default the example listens for `computer`, `jarvis`, and `alexa`. Override with the comma-separated `WAKE_WORDS` environment variable:
 
-```cpp
-std::vector<std::string> wakeWords = {"computer", "jarvis", "alexa"};
+```bash
+WAKE_WORDS="assistant,computer" ./build/WhisperWakeWordEngine
 ```
 
 At runtime, downstream code can replace the list:
@@ -124,11 +149,11 @@ At runtime, downstream code can replace the list:
 wakeEngine->update_wake_words({"assistant", "computer"});
 ```
 
-Wake words are normalized to lowercase internally before matching.
+Wake words are normalized to lowercase internally before matching, and matching is performed on whole words only.
 
 ## Public Interface
 
-Use `WakeWordEngine` with a callback that receives both the matched trigger word and the full transcribed phrase:
+Use `WakeWordEngine` with a `WakeWordConfig` and a callback that receives both the matched trigger word and the full transcribed phrase:
 
 ```cpp
 class WakeWordEngine : public cBaseWorker_V2
@@ -138,9 +163,7 @@ public:
         const std::string &matchedWord,
         const std::string &fullSentence)>;
 
-    WakeWordEngine(const std::string &model_path,
-                   const std::vector<std::string> &wake_words,
-                   WakeWordCallback callback = nullptr);
+    explicit WakeWordEngine(const WakeWordConfig &cfg, WakeWordCallback callback = nullptr);
     ~WakeWordEngine() noexcept override;
 
     void set_callback(WakeWordCallback callback);
@@ -153,6 +176,29 @@ protected:
 };
 ```
 
+`WakeWordConfig` centralizes model path, wake words, VAD timing (calibration, pause, pre-roll, max phrase duration, threshold tuning, hysteresis), whisper parameters (`cpuThreads`, `beamSize`, `entropyThreshold`, `language`), and worker queue depth:
+
+```cpp
+struct WakeWordConfig
+{
+    std::string modelPath;
+    std::vector<std::string> wakeWords = {"computer", "jarvis", "alexa"};
+    std::string language = "en";
+    int cpuThreads = 4;
+    int beamSize = 5;
+    float entropyThreshold = 2.4f;
+    float calibrationSeconds = 1.5f;
+    float pauseSeconds = 1.0f;
+    float prerollSeconds = 0.5f;
+    float maxPhraseSeconds = 60.0f;
+    float thresholdMultiplier = 2.5f;
+    float hysteresisRatio = 0.7f;
+    float thresholdFloor = 0.003f;
+    size_t maxQueueDepth = 32;
+    unsigned bufferFrames = 512;
+};
+```
+
 Minimal usage:
 
 ```cpp
@@ -161,11 +207,11 @@ auto on_wake = [](const std::string &word, const std::string &sentence) {
     std::cout << "Phrase: " << sentence << "\n";
 };
 
-WakeWordEngine engine(
-    "~/models/ggml-base.en.bin",
-    {"computer", "jarvis", "alexa"},
-    on_wake);
+WakeWordConfig cfg;
+cfg.modelPath = "~/models/ggml-base.en.bin";
+cfg.wakeWords = {"computer", "jarvis", "alexa"};
 
+WakeWordEngine engine(cfg, on_wake);
 engine.startThread(cBaseWorker_V2::duration_type{15000});
 ```
 
@@ -181,6 +227,8 @@ pkg-config --modversion rtaudio
 pkg-config --modversion whisper
 ```
 
+The build prefers `pkg-config` for whisper and ggml but validates that the reported include directory actually contains `whisper.h` / `ggml-backend.h` (guarding against stale Homebrew Cellar paths), then falls back to `find_library` and `brew --prefix`.
+
 ### Missing GGML symbols while linking
 
 The CMake file links both Whisper and GGML. If your Homebrew installation changes library names or paths, confirm the libraries are visible:
@@ -192,7 +240,7 @@ ls /opt/homebrew/lib/libggml*
 
 ### Model file not found
 
-Confirm the model exists at the path used by `example_wakeword.cpp`:
+Confirm the model exists at the resolved path:
 
 ```bash
 ls ~/models/ggml-base.en.bin
@@ -208,7 +256,5 @@ System Settings -> Privacy & Security -> Microphone
 
 ## Roadmap
 
-- Add a small configuration object for VAD thresholds, pause timing, and wake-word sensitivity.
-- Support phrase-boundary matching to reduce accidental substring matches.
 - Emit structured wake events for local LLM and automation integrations.
 - Add optional logging hooks for debugging calibration and matching behavior.

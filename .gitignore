@@ -19,6 +19,7 @@ CTestTestfile.cmake
 *.exe
 *.bin
 WhisperWakeWordEngine
+ww_tests
 
 # Runtime and diagnostic output
 *.log
